@@ -26,13 +26,18 @@ from languages import LANG
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
-URL_ENDPOINT_GENERATE = 'http://127.0.0.1:5001/api/v1/generate'
+URL_ENDPOINT_GENERATE_TEXT = 'http://127.0.0.1:5001/api/v1/generate'
+URL_ENDPOINT_GENERATE_VOICE = 'http://localhost:8020/tts_to_file'
+XTTS_SPEAKERS = {
+    'ru': 'rus_female.wav',
+    'en': 'ebonia.wav'
+}
 HEADERS = {}
 CHAT, ANOTHER_SOMETHING = range(2)
 
 jack_cabbot = telegram.Bot(TELEGRAM_TOKEN)
 
-payload = {
+payload_llm = {
         'max_context_length': 2048,
         'max_length': 512,
         'prompt': '',
@@ -47,6 +52,12 @@ payload = {
         'top_p': 0.9,
         'typical': 1
     }
+payload_xtts = {
+  "text": "",
+  "speaker_wav": "",
+  "language": "",
+  "file_name_or_path": "output.wav"
+}
 
 # updater = Updater(token=TELEGRAM_TOKEN)
 
@@ -72,6 +83,24 @@ def save_context_to_database():
                     data_to_insert)
     con.commit()
     con.close()
+
+
+async def generate_voice_file(text: str, lang: str):
+    if lang not in {'ru', 'en'}:
+        lang = 'en'
+    payload_xtts['text'] = text
+    payload_xtts['language'] = lang
+    payload_xtts['speaker_wav'] = XTTS_SPEAKERS.get(lang)
+    try:
+        responce = requests.post(
+                URL_ENDPOINT_GENERATE_VOICE,
+                headers=HEADERS,
+                json=payload_xtts
+            )
+    except Exception as e:
+        print('Exceprion in voice generation!', e)
+        return
+    return responce.json().get('output_path')
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -138,12 +167,12 @@ async def send_request_to_kobold(text: str, chat_id: int):
     #           f'<|im_start|>user {text} <|im_end|>'
     #           '<|im_start|>assistant')
     prompt = context_dict[chat_id]
-    payload['prompt'] = prompt
+    payload_llm['prompt'] = prompt
     try:
         ai_response = requests.post(
-            URL_ENDPOINT_GENERATE,
+            URL_ENDPOINT_GENERATE_TEXT,
             headers=HEADERS,
-            json=payload
+            json=payload_llm
         )
     except Exception as e:
         print('Error 1 occured: ', e)
@@ -212,9 +241,10 @@ signal.signal(signal.SIGINT, signal_handler)
 
 
 async def main_test():
-    await bot_send_message(TELEGRAM_CHAT_ID, 'hello world')
+    text = input()
+    await generate_voice_file(text, detect(text))
 
 
 if __name__ == '__main__':
     # asyncio.run(main_test())
-    main()
+    asyncio.run(main_test())
